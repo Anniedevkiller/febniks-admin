@@ -3,11 +3,11 @@
 @theme inline {
   --color-primary: #E63946;
   --color-primary-dark: #cc323e;
-  --color-sidebar: #9B2226;
+  --color-sidebar: var(--sidebar-color);
   --color-accent: #F4A261;
-  --color-bg-light: #F8F9FA;
-  --color-surface: #FFFFFF;
-  --color-border: #E5E7EB;
+  --color-bg-light: var(--bg-light);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
   
   --font-sans: "Inter", system-ui, -apple-system, sans-serif;
   --font-display: "Outfit", system-ui, -apple-system, sans-serif;
@@ -19,8 +19,90 @@
 :root {
   --background: #F8F9FA;
   --foreground: #1A1A1A;
+  --surface: #FFFFFF;
+  --border: #E5E7EB;
+  --bg-light: #F8F9FA;
+  --sidebar-color: #9B2226;
   --sidebar-width: 280px;
   --sidebar-collapsed-width: 80px;
+}
+
+.dark {
+  --background: #0B0F19;      /* slate 950 */
+  --foreground: #F1F5F9;      /* slate 100 */
+  --surface: #151D30;         /* slate 900 custom */
+  --border: #1E293B;          /* slate 800 */
+  --bg-light: #0B0F19;
+  --sidebar-color: #111827;   /* gray 900 */
+
+  /* Overrides for text color in dark mode */
+  .text-gray-900 {
+    color: #F8FAFC !important;
+  }
+  .text-gray-800 {
+    color: #F1F5F9 !important;
+  }
+  .text-gray-700 {
+    color: #E2E8F0 !important;
+  }
+  .text-gray-600 {
+    color: #CBD5E1 !important;
+  }
+  .text-gray-500 {
+    color: #94A3B8 !important;
+  }
+  .text-gray-400 {
+    color: #64748B !important;
+  }
+  
+  /* Overrides for backgrounds in dark mode */
+  .bg-white {
+    background-color: var(--surface) !important;
+  }
+  .bg-gray-50, .bg-gray-50\/50 {
+    background-color: #0F172A !important;
+  }
+  .bg-gray-100 {
+    background-color: #1E293B !important;
+  }
+  .bg-gray-100\/50 {
+    background-color: rgba(30, 41, 59, 0.5) !important;
+  }
+  .bg-gray-100\/10 {
+    background-color: rgba(255, 255, 255, 0.05) !important;
+  }
+  .hover\:bg-gray-50:hover {
+    background-color: #1E293B !important;
+  }
+  .hover\:bg-gray-100:hover {
+    background-color: #1E293B !important;
+  }
+  .hover\:bg-white:hover {
+    background-color: #1E293B !important;
+  }
+  
+  /* Overrides for inputs in dark mode */
+  input, textarea, select {
+    background-color: #1E293B !important;
+    border-color: var(--border) !important;
+    color: #F8FAFC !important;
+  }
+  input::placeholder, textarea::placeholder {
+    color: #64748B !important;
+  }
+  
+  /* Overrides for borders in dark mode */
+  .border-border, .border-gray-100, .border-gray-200, .border-white\/10 {
+    border-color: var(--border) !important;
+  }
+
+  /* Table Specific Overrides */
+  table thead tr {
+    background-color: #1E293B !important;
+  }
+  table tbody tr:hover {
+    background-color: rgba(255, 255, 255, 0.02) !important;
+  }
 }
 
 @layer base {
@@ -29,6 +111,7 @@
     color: var(--foreground);
     @apply antialiased min-h-screen;
     font-family: var(--font-sans);
+    transition: background-color 0.3s ease, color 0.3s ease;
   }
 
   h1, h2, h3, h4, h5, h6 {

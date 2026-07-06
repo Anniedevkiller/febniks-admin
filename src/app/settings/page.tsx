@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import Link from "next/link";
+import { useTheme } from "@/lib/ThemeContext";
 
 const sections = [
   { 
@@ -76,9 +77,10 @@ const initialTeam = [
 const availablePermissions = ["Orders", "Menu", "Inventory", "Payments", "Analytics", "Support"];
 
 export default function SettingsPage() {
-const [team, setTeam] = useState<any[]>(initialTeam);
+  const [team, setTeam] = useState<any[]>(initialTeam);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
+  const { theme, setTheme } = useTheme();
 
   const [newMember, setNewMember] = useState({
     name: "",
@@ -187,10 +189,26 @@ const [team, setTeam] = useState<any[]>(initialTeam);
                   <h4 className="font-black text-lg mb-2 uppercase tracking-tight">Display Preference</h4>
                   <p className="text-xs text-white/60 mb-8 font-medium">Adapt the dashboard appearance to your environment.</p>
                   <div className="flex bg-white/10 backdrop-blur-md p-1.5 rounded-2xl border border-white/10">
-                     <button className="flex-1 py-3 rounded-xl bg-white text-gray-900 flex items-center justify-center gap-3 text-xs font-black uppercase tracking-widest shadow-lg transition-all">
+                     <button 
+                        onClick={() => setTheme("light")}
+                        className={cn(
+                          "flex-1 py-3 rounded-xl flex items-center justify-center gap-3 text-xs font-black uppercase tracking-widest transition-all",
+                          theme === "light" 
+                            ? "bg-white text-gray-900 shadow-lg" 
+                            : "text-white/60 hover:text-white hover:bg-white/10"
+                        )}
+                     >
                         <Sun className="w-4 h-4" /> Light
                      </button>
-                     <button className="flex-1 py-3 rounded-xl text-white/60 flex items-center justify-center gap-3 text-xs font-black uppercase tracking-widest transition-all hover:text-white">
+                     <button 
+                        onClick={() => setTheme("dark")}
+                        className={cn(
+                          "flex-1 py-3 rounded-xl flex items-center justify-center gap-3 text-xs font-black uppercase tracking-widest transition-all",
+                          theme === "dark" 
+                            ? "bg-white text-gray-900 shadow-lg" 
+                            : "text-white/60 hover:text-white hover:bg-white/10"
+                        )}
+                     >
                         <Moon className="w-4 h-4" /> Dark
                      </button>
                   </div>
