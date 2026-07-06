@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-primary: #E63946;
+  --color-primary-dark: #cc323e;
+  --color-sidebar: #9B2226;
+  --color-accent: #F4A261;
+  --color-bg-light: #F8F9FA;
+  --color-surface: #FFFFFF;
+  --color-border: #E5E7EB;
+  
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-display: "Outfit", system-ui, -apple-system, sans-serif;
+
+  --radius-xl: 1rem;
+  --radius-2xl: 1.5rem;
+}
+
+:root {
+  --background: #F8F9FA;
+  --foreground: #1A1A1A;
+  --sidebar-width: 280px;
+  --sidebar-collapsed-width: 80px;
+}
+
+@layer base {
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    @apply antialiased min-h-screen;
+    font-family: var(--font-sans);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    @apply font-semibold;
+  }
+}
+
+@layer components {
+  .dashboard-card {
+    @apply bg-surface rounded-xl border border-border p-6 shadow-sm transition-all duration-300 hover:shadow-md;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-white px-4 py-2 rounded-lg font-medium transition-all duration-200 hover:bg-primary-dark active:scale-[0.98] disabled:opacity-50;
+  }
+
+  .sidebar-link {
+    @apply flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 text-gray-400 hover:text-white hover:bg-white/10;
+  }
+
+  .sidebar-link-active {
+    @apply bg-accent text-white hover:bg-accent/90;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #E5E7EB;
+  border-radius: 10px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #D1D5DB;
+}
