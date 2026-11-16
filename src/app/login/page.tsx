@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { 
   Lock, 
   Mail, 
@@ -10,40 +10,129 @@ import {
   ShieldCheck, 
   Eye, 
   EyeOff,
-  CloudLightning
+  CloudLightning,
+  AlertCircle,
+  X
 } from "lucide-react";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { setSession, getSession } from "@/lib/auth";
+import { createClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
-  const [email, setEmail] = useState("admin@febniks.com");
-  const [password, setPassword] = useState("password123");
+function LoginFormContent() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Forgot password modal state
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [isResetting, setIsResetting] = useState(false);
+
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const supabase = createClient();
 
   useEffect(() => {
-    if (getSession()) {
-      router.push("/dashboard");
+    const savedEmail = localStorage.getItem("febniks_remember_email");
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
     }
-  }, [router]);
+
+    const errParam = searchParams.get("error");
+    if (errParam === "access_denied") {
+      setErrorMsg("Access denied. Your account does not have administrator privileges.");
+      toast.error("Access denied");
+    } else if (errParam === "invalid_recovery_link") {
+      setErrorMsg("Password recovery link is invalid or has expired.");
+    }
+  }, [searchParams]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrorMsg(null);
     setIsLoading(true);
-    
-    // Simulate API call
-    setTimeout(() => {
-      if (email === "admin@febniks.com" && password === "password123") {
-        setSession("mock_token_12345");
-        toast.success("Welcome back, Admin!");
-        router.push("/dashboard");
-      } else {
-        toast.error("Invalid credentials. Try admin@febniks.com / password123");
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error || !data.user) {
+        const msg = error?.message || "Invalid email or password.";
+        setErrorMsg(msg);
+        toast.error(msg);
+        return;
       }
+
+      // Check admin role in profiles
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("role, full_name")
+        .eq("id", data.user.id)
+        .single();
+
+      if (profileError || !profile || profile.role !== "admin") {
+        await supabase.auth.signOut();
+        const deniedMsg = "Access denied. Only administrators can sign in here.";
+        setErrorMsg(deniedMsg);
+        toast.error("Access denied");
+        return;
+      }
+
+      if (rememberMe) {
+        localStorage.setItem("febniks_remember_email", email.trim());
+      } else {
+        localStorage.removeItem("febniks_remember_email");
+      }
+
+      toast.success(`Welcome back, ${profile.full_name || "Admin"}!`);
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setErrorMsg("An unexpected error occurred. Please try again.");
+      toast.error("Sign in failed.");
+    } finally {
       setIsLoading(false);
-    }, 1500);
+    }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail.trim()) {
+      toast.error("Please enter your email address.");
+      return;
+    }
+
+    setIsResetting(true);
+    try {
+      const siteUrl =
+        process.env.NEXT_PUBLIC_SITE_URL ||
+        (typeof window !== "undefined" ? window.location.origin : "");
+      const redirectTo = `${siteUrl.replace(/\/$/, "")}/auth/callback?next=/reset-password`;
+
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        resetEmail.trim(),
+        { redirectTo }
+      );
+
+      if (error) {
+        toast.error(error.message || "Failed to send password reset email.");
+        return;
+      }
+
+      toast.success("Password reset link sent! Check your email inbox.");
+      setShowForgotModal(false);
+      setResetEmail("");
+    } catch {
+      toast.error("Failed to send reset email.");
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   return (
@@ -99,6 +188,13 @@ export default function LoginPage() {
                 <p className="text-gray-500 font-medium">Please enter your credentials to access the admin panel.</p>
              </div>
 
+             {errorMsg && (
+               <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 flex items-start gap-3 text-red-700 text-sm font-semibold">
+                 <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-red-600" />
+                 <span>{errorMsg}</span>
+               </div>
+             )}
+
              <form onSubmit={handleLogin} className="space-y-6">
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-2 uppercase tracking-wide">Email Address</label>
@@ -139,10 +235,25 @@ export default function LoginPage() {
 
                 <div className="flex items-center justify-between">
                    <div className="flex items-center gap-2">
-                      <input type="checkbox" id="remember" className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary" defaultChecked />
+                      <input
+                        type="checkbox"
+                        id="remember"
+                        checked={rememberMe}
+                        onChange={(e) => setRememberMe(e.target.checked)}
+                        className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary"
+                      />
                       <label htmlFor="remember" className="text-sm font-medium text-gray-600">Remember me</label>
                    </div>
-                   <button type="button" className="text-sm font-bold text-primary hover:underline">Forgot Password?</button>
+                   <button
+                     type="button"
+                     onClick={() => {
+                       setResetEmail(email);
+                       setShowForgotModal(true);
+                     }}
+                     className="text-sm font-bold text-primary hover:underline"
+                   >
+                     Forgot Password?
+                   </button>
                 </div>
 
                 <button 
@@ -169,7 +280,81 @@ export default function LoginPage() {
              </div>
           </motion.div>
       </div>
+
+      {/* Forgot Password Modal */}
+      <AnimatePresence>
+        {showForgotModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl border border-border"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-black text-gray-900 font-display">Reset Password</h3>
+                  <p className="text-xs text-gray-500 font-medium mt-1">
+                    We will send a password reset link to your admin email.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowForgotModal(false)}
+                  className="p-2 hover:bg-gray-100 rounded-xl transition-colors text-gray-500"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleForgotPassword} className="space-y-5">
+                <div>
+                  <label className="block text-xs font-bold text-gray-700 mb-2 uppercase tracking-wide">
+                    Admin Email Address
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <input
+                      type="email"
+                      required
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      placeholder="admin@febniks.com"
+                      className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-4 outline-none focus:ring-4 focus:ring-primary/10 focus:border-primary transition-all font-medium"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotModal(false)}
+                    className="flex-1 py-3.5 bg-gray-100 text-gray-600 rounded-xl font-bold text-sm hover:bg-gray-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isResetting}
+                    className="flex-1 py-3.5 bg-primary text-white rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary-dark transition-all disabled:opacity-70"
+                  >
+                    {isResetting ? "Sending..." : "Send Reset Link"}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#F8F9FA]" />}>
+      <LoginFormContent />
+    </Suspense>
   );
 }
 

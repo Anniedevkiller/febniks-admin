@@ -25,7 +25,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   const pathname = usePathname();
-  const isLoginPage = pathname === "/login";
+  const isAuthPage = pathname === "/login" || pathname === "/reset-password";
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
@@ -40,7 +40,7 @@ export default function RootLayout({
         <ThemeProvider>
           <Toaster position="top-right" richColors />
           
-          {isLoginPage ? (
+          {isAuthPage ? (
             <main className="min-h-screen">{children}</main>
           ) : (
             <div className="flex" style={{ "--sidebar-width": isCollapsed ? "80px" : "280px" } as React.CSSProperties}>

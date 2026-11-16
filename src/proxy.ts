@@ -1,33 +1,86 @@
-import { NextResponse } from 'next/server'
-import type { NextRequest } from 'next/server'
+import { NextResponse, type NextRequest } from "next/server";
+import { createServerClient } from "@supabase/ssr";
 
-export function proxy(request: NextRequest) {
-  const authCookie = request.cookies.get('febniks_auth')
-  const isLoginPage = request.nextUrl.pathname === '/login'
+export async function proxy(request: NextRequest) {
+  let supabaseResponse = NextResponse.next({
+    request,
+  });
 
-  // If trying to access dashboard without auth, redirect to login
-  if (!authCookie && !isLoginPage && request.nextUrl.pathname !== '/') {
-    return NextResponse.redirect(new URL('/login', request.url))
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return request.cookies.getAll();
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) =>
+            request.cookies.set(name, value)
+          );
+          supabaseResponse = NextResponse.next({
+            request,
+          });
+          cookiesToSet.forEach(({ name, value, options }) =>
+            supabaseResponse.cookies.set(name, value, options)
+          );
+        },
+      },
+    }
+  );
+
+  const pathname = request.nextUrl.pathname;
+  const isPublicAuthRoute =
+    pathname === "/login" ||
+    pathname === "/reset-password" ||
+    pathname.startsWith("/auth/");
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    if (!isPublicAuthRoute) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      return NextResponse.redirect(loginUrl);
+    }
+    return supabaseResponse;
   }
 
-  // If authenticated and trying to access login, redirect to dashboard
-  if (authCookie && isLoginPage) {
-    return NextResponse.redirect(new URL('/dashboard', request.url))
+  // User is signed in — verify profiles.role === 'admin'
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .single();
+
+  if (!profile || profile.role !== "admin") {
+    await supabase.auth.signOut();
+    const deniedUrl = request.nextUrl.clone();
+    deniedUrl.pathname = "/login";
+    deniedUrl.searchParams.set("error", "access_denied");
+    const redirectResponse = NextResponse.redirect(deniedUrl);
+    // Copy any cleared auth cookies from supabaseResponse
+    supabaseResponse.cookies.getAll().forEach((c) => {
+      redirectResponse.cookies.set(c.name, c.value);
+    });
+    return redirectResponse;
   }
 
-  return NextResponse.next()
+  // Admin visiting /login -> redirect to /dashboard
+  if (pathname === "/login" || pathname === "/") {
+    const dashUrl = request.nextUrl.clone();
+    dashUrl.pathname = "/dashboard";
+    dashUrl.search = "";
+    return NextResponse.redirect(dashUrl);
+  }
+
+  return supabaseResponse;
 }
 
-// See "Matching Paths" below to learn more
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    '/((?!api|_next/static|_next/image|favicon.ico).*)',
+    "/((?!api|_next/static|_next/image|favicon.ico).*)",
   ],
-}
+};

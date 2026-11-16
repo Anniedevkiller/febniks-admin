@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { 
   Search, 
-  Filter, 
   Download, 
-  MoreVertical, 
   Eye, 
   CheckCircle2, 
   Clock, 
@@ -13,42 +13,174 @@ import {
   Utensils, 
   User,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  AlertCircle,
+  XCircle,
+  CreditCard
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import {
+  ORDER_STATUS_LABELS,
+  type Order,
+  type OrderStatus,
+} from "@/lib/types";
 
-const orders = [
-  { id: "#ORD-7721", customer: "John Doe", email: "john@example.com", items: "Grilled Tilapia, Jollof Rice", total: "₦12,500", status: "Delivered", payment: "Paid", time: "26 Mar, 12:45 PM" },
-  { id: "#ORD-7722", customer: "Jane Smith", email: "jane@example.com", items: "Catfish Pepper Soup", total: "₦8,000", status: "Cooking", payment: "Paid", time: "26 Mar, 01:10 PM" },
-  { id: "#ORD-7723", customer: "Robert Brown", email: "robert@example.com", items: "Fried Fish, Plantain", total: "₦5,500", status: "Out for delivery", payment: "Paid", time: "26 Mar, 01:15 PM" },
-  { id: "#ORD-7724", customer: "Alice Green", email: "alice@example.com", items: "Spicy Croaker Fish", total: "₦9,200", status: "Pending", payment: "Pending", time: "26 Mar, 01:25 PM" },
-  { id: "#ORD-7725", customer: "Samuel Ade", email: "sam@example.com", items: "Jollof Rice, Chicken", total: "₦6,500", status: "Ready", payment: "Paid", time: "26 Mar, 01:30 PM" },
-  { id: "#ORD-7726", customer: "Grace Opara", email: "grace@example.com", items: "Grilled Fish, Yam Fries", total: "₦11,000", status: "Pending", payment: "Failed", time: "26 Mar, 01:35 PM" },
-  { id: "#ORD-7727", customer: "David Kalu", email: "david@example.com", items: "Fisherman Soup", total: "₦15,000", status: "Delivered", payment: "Paid", time: "26 Mar, 11:20 AM" },
-  { id: "#ORD-7728", customer: "Mary Eze", email: "mary@example.com", items: "Fried Croaker, Salad", total: "₦8,500", status: "Cooking", payment: "Paid", time: "26 Mar, 01:40 PM" },
+const statusStyles: Record<OrderStatus, string> = {
+  pending: "bg-gray-100 text-gray-700 border-gray-200",
+  awaiting_confirmation: "bg-amber-100 text-amber-800 border-amber-200",
+  paid: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  preparing: "bg-blue-100 text-blue-700 border-blue-200",
+  ready: "bg-cyan-100 text-cyan-700 border-cyan-200",
+  out_for_delivery: "bg-purple-100 text-purple-700 border-purple-200",
+  delivered: "bg-green-100 text-green-700 border-green-200",
+  cancelled: "bg-red-100 text-red-700 border-red-200",
+  payment_rejected: "bg-rose-100 text-rose-700 border-rose-200",
+};
+
+const statusIcons: Record<OrderStatus, any> = {
+  pending: Clock,
+  awaiting_confirmation: CreditCard,
+  paid: CheckCircle2,
+  preparing: Utensils,
+  ready: CheckCircle2,
+  out_for_delivery: Truck,
+  delivered: CheckCircle2,
+  cancelled: XCircle,
+  payment_rejected: AlertCircle,
+};
+
+const filterTabs: { label: string; value: "all" | OrderStatus }[] = [
+  { label: "All Orders", value: "all" },
+  { label: "Awaiting Confirmation", value: "awaiting_confirmation" },
+  { label: "Paid", value: "paid" },
+  { label: "Preparing", value: "preparing" },
+  { label: "Ready", value: "ready" },
+  { label: "Out for Delivery", value: "out_for_delivery" },
+  { label: "Delivered", value: "delivered" },
+  { label: "Pending", value: "pending" },
+  { label: "Rejected / Cancelled", value: "payment_rejected" },
 ];
 
-const statusStyles: Record<string, string> = {
-  "Pending": "bg-orange-100 text-orange-700 border-orange-200",
-  "Cooking": "bg-blue-100 text-blue-700 border-blue-200",
-  "Ready": "bg-cyan-100 text-cyan-700 border-cyan-200",
-  "Out for delivery": "bg-purple-100 text-purple-700 border-purple-200",
-  "Delivered": "bg-green-100 text-green-700 border-green-200",
-};
+function OrdersContent() {
+  const searchParams = useSearchParams();
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState(searchParams.get("q") || "");
+  const [activeTab, setActiveTab] = useState<"all" | OrderStatus>(
+    (searchParams.get("status") as OrderStatus) || "all"
+  );
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
 
-const statusIcons: Record<string, any> = {
-  "Pending": Clock,
-  "Cooking": Utensils,
-  "Ready": CheckCircle2,
-  "Out for delivery": Truck,
-  "Delivered": CheckCircle2,
-};
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/orders");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load orders");
+      setOrders(json.orders || []);
+    } catch (err: any) {
+      toast.error(err.message || "Error loading orders");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
-export default function OrdersPage() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState("All Orders");
+  useEffect(() => {
+    fetchOrders();
+    const supabase = createClient();
+    const channel = supabase
+      .channel("orders-realtime-list")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "orders" },
+        () => {
+          fetchOrders();
+        }
+      )
+      .subscribe();
 
-  const tabs = ["All Orders", "Pending", "Preparing", "Out for Delivery", "Completed"];
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchOrders]);
+
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (q !== null) setSearchTerm(q);
+  }, [searchParams]);
+
+  const filteredOrders = orders.filter((order) => {
+    const matchesStatus =
+      activeTab === "all"
+        ? true
+        : activeTab === "payment_rejected"
+        ? order.status === "payment_rejected" || order.status === "cancelled"
+        : order.status === activeTab;
+
+    const q = searchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !q ||
+      order.order_number.toLowerCase().includes(q) ||
+      order.customer_name.toLowerCase().includes(q) ||
+      (order.customer_email || "").toLowerCase().includes(q) ||
+      (order.customer_phone || "").toLowerCase().includes(q) ||
+      (order.payer_name || "").toLowerCase().includes(q);
+
+    return matchesStatus && matchesSearch;
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / pageSize));
+  const paginatedOrders = filteredOrders.slice(
+    (page - 1) * pageSize,
+    page * pageSize
+  );
+
+  // Live Stat Counters
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const awaitingConfirmationCount = orders.filter(
+    (o) => o.status === "awaiting_confirmation"
+  ).length;
+  const preparingCount = orders.filter(
+    (o) => o.status === "paid" || o.status === "preparing" || o.status === "ready"
+  ).length;
+  const onTheWayCount = orders.filter(
+    (o) => o.status === "out_for_delivery"
+  ).length;
+  const deliveredTodayCount = orders.filter(
+    (o) => o.status === "delivered" && o.created_at.slice(0, 10) === todayStr
+  ).length;
+
+  const exportCsv = () => {
+    const headers = [
+      "Order Number",
+      "Customer",
+      "Email",
+      "Phone",
+      "Status",
+      "Total (NGN)",
+      "Created At",
+    ];
+    const rows = filteredOrders.map((o) => [
+      o.order_number,
+      `"${(o.customer_name || "").replace(/"/g, '""')}"`,
+      o.customer_email || "",
+      o.customer_phone || "",
+      o.status,
+      o.total,
+      o.created_at,
+    ]);
+    const csvContent =
+      "data:text/csv;charset=utf-8," +
+      [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const link = document.createElement("a");
+    link.setAttribute("href", encodeURI(csvContent));
+    link.setAttribute("download", `febniks-orders-${todayStr}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="space-y-6">
@@ -59,7 +191,19 @@ export default function OrdersPage() {
           <p className="text-gray-500 mt-1">Track and manage all customer orders in real-time.</p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-border rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
+          {awaitingConfirmationCount > 0 && (
+            <Link
+              href="/payments"
+              className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-bold hover:bg-amber-600 transition-colors shadow-sm"
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>{awaitingConfirmationCount} Awaiting Verification</span>
+            </Link>
+          )}
+          <button
+            onClick={exportCsv}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-border rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
             <Download className="w-4 h-4" />
             <span>Export CSV</span>
           </button>
@@ -69,10 +213,10 @@ export default function OrdersPage() {
       {/* Stats Overview */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         {[
-          { label: "New Orders", value: "12", color: "text-orange-600", bg: "bg-orange-50" },
-          { label: "Preparing", value: "8", color: "text-blue-600", bg: "bg-blue-50" },
-          { label: "On the way", value: "5", color: "text-purple-600", bg: "bg-purple-50" },
-          { label: "Delivered today", value: "34", color: "text-green-600", bg: "bg-green-50" },
+          { label: "Awaiting Confirmation", value: String(awaitingConfirmationCount), color: "text-orange-600", bg: "bg-orange-50" },
+          { label: "Paid / In Kitchen", value: String(preparingCount), color: "text-blue-600", bg: "bg-blue-50" },
+          { label: "On the way", value: String(onTheWayCount), color: "text-purple-600", bg: "bg-purple-50" },
+          { label: "Delivered today", value: String(deliveredTodayCount), color: "text-green-600", bg: "bg-green-50" },
         ].map((stat) => (
           <div key={stat.label} className={cn("p-4 rounded-2xl border border-transparent", stat.bg)}>
             <p className="text-xs font-bold uppercase tracking-wider text-gray-500">{stat.label}</p>
@@ -85,19 +229,22 @@ export default function OrdersPage() {
       <div className="dashboard-card overflow-hidden !p-0">
         {/* Table Filters/Tabs */}
         <div className="px-6 py-4 border-b border-border flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="flex items-center space-x-1 p-1 bg-gray-100 rounded-xl w-fit">
-            {tabs.map((tab) => (
+          <div className="flex items-center space-x-1 p-1 bg-gray-100 rounded-xl w-fit max-w-full overflow-x-auto no-scrollbar">
+            {filterTabs.map((tab) => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
+                key={tab.value}
+                onClick={() => {
+                  setActiveTab(tab.value);
+                  setPage(1);
+                }}
                 className={cn(
-                  "px-4 py-2 text-sm font-medium rounded-lg transition-all",
-                  activeTab === tab 
+                  "px-3.5 py-2 text-xs font-bold rounded-lg transition-all whitespace-nowrap",
+                  activeTab === tab.value 
                     ? "bg-white text-gray-900 shadow-sm" 
                     : "text-gray-500 hover:text-gray-700"
                 )}
               >
-                {tab}
+                {tab.label}
               </button>
             ))}
           </div>
@@ -106,10 +253,13 @@ export default function OrdersPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search by Order ID or Name..."
+              placeholder="Search Order # or Customer..."
               className="w-full bg-gray-50 border border-border rounded-xl py-2 pl-10 pr-4 text-sm focus:ring-2 focus:ring-primary/10 transition-all outline-none"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
             />
           </div>
         </div>
@@ -123,69 +273,112 @@ export default function OrdersPage() {
                 <th className="py-4 px-2">Customer</th>
                 <th className="py-4 px-2">Menu Items</th>
                 <th className="py-4 px-2">Total Amount</th>
-                <th className="py-4 px-2">Payment</th>
+                <th className="py-4 px-2">Payer / Proof</th>
                 <th className="py-4 px-2">Order Status</th>
                 <th className="py-4 px-6 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {orders.map((order) => {
-                const StatusIcon = statusIcons[order.status] || Clock;
-                return (
-                  <tr key={order.id} className="hover:bg-gray-50/80 transition-colors group">
-                    <td className="py-5 px-6">
-                      <div className="flex flex-col">
-                        <span className="font-bold text-gray-900">{order.id}</span>
-                        <span className="text-[10px] text-gray-400 mt-0.5">{order.time}</span>
-                      </div>
-                    </td>
-                    <td className="py-5 px-2">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center border border-border">
-                          <User className="w-4 h-4 text-gray-500" />
+              {isLoading ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-sm text-gray-400 font-medium">
+                    Loading live orders...
+                  </td>
+                </tr>
+              ) : paginatedOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-sm text-gray-400 font-medium">
+                    No matching orders found.
+                  </td>
+                </tr>
+              ) : (
+                paginatedOrders.map((order) => {
+                  const StatusIcon = statusIcons[order.status] || Clock;
+                  const itemsSummary =
+                    order.order_items && order.order_items.length > 0
+                      ? order.order_items
+                          .map((i) => `${i.meal_name} (x${i.quantity})`)
+                          .join(", ")
+                      : "—";
+
+                  return (
+                    <tr key={order.id} className="hover:bg-gray-50/80 transition-colors group">
+                      <td className="py-5 px-6">
+                        <Link href={`/orders/${order.id}`} className="flex flex-col hover:text-primary">
+                          <span className="font-bold text-gray-900 group-hover:text-primary">
+                            #{order.order_number}
+                          </span>
+                          <span className="text-[10px] text-gray-400 mt-0.5">
+                            {new Date(order.created_at).toLocaleString("en-NG", {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            })}
+                          </span>
+                        </Link>
+                      </td>
+                      <td className="py-5 px-2">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center border border-border shrink-0">
+                            <User className="w-4 h-4 text-gray-500" />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-semibold text-gray-900">
+                              {order.customer_name}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {order.customer_phone || order.customer_email || "—"}
+                            </span>
+                          </div>
                         </div>
+                      </td>
+                      <td className="py-5 px-2">
+                        <p className="text-sm text-gray-600 max-w-[200px] truncate" title={itemsSummary}>
+                          {itemsSummary}
+                        </p>
+                      </td>
+                      <td className="py-5 px-2">
+                        <span className="text-sm font-bold text-gray-900">
+                          ₦{Number(order.total).toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="py-5 px-2">
                         <div className="flex flex-col">
-                          <span className="text-sm font-semibold text-gray-900">{order.customer}</span>
-                          <span className="text-xs text-gray-500">{order.email}</span>
+                          <span className="text-xs font-semibold text-gray-700">
+                            {order.payer_name || "—"}
+                          </span>
+                          {order.payment_proof_path ? (
+                            <span className="text-[10px] font-bold text-emerald-600">
+                              Receipt Attached
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">No Receipt</span>
+                          )}
                         </div>
-                      </div>
-                    </td>
-                    <td className="py-5 px-2">
-                      <p className="text-sm text-gray-600 max-w-[180px] truncate">{order.items}</p>
-                    </td>
-                    <td className="py-5 px-2">
-                      <span className="text-sm font-bold text-gray-900">{order.total}</span>
-                    </td>
-                    <td className="py-5 px-2">
-                      <span className={cn(
-                        "text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-tighter",
-                        order.payment === "Paid" ? "text-green-600 bg-green-50" : "text-red-500 bg-red-50"
-                      )}>
-                        {order.payment}
-                      </span>
-                    </td>
-                    <td className="py-5 px-2">
-                      <div className={cn(
-                        "flex items-center gap-1.5 w-fit px-3 py-1.5 rounded-full border text-[11px] font-bold uppercase tracking-tight shadow-sm transition-all",
-                        statusStyles[order.status]
-                      )}>
-                        <StatusIcon className="w-3.5 h-3.5" />
-                        {order.status}
-                      </div>
-                    </td>
-                    <td className="py-5 px-6 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button className="p-2 hover:bg-white rounded-lg border border-transparent hover:border-border transition-all text-gray-400 hover:text-primary">
-                          <Eye className="w-4 h-4" />
-                        </button>
-                        <button className="p-2 hover:bg-white rounded-lg border border-transparent hover:border-border transition-all text-gray-400 hover:text-gray-900">
-                          <MoreVertical className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
+                      </td>
+                      <td className="py-5 px-2">
+                        <div className={cn(
+                          "flex items-center gap-1.5 w-fit px-3 py-1.5 rounded-full border text-[11px] font-bold uppercase tracking-tight shadow-sm transition-all",
+                          statusStyles[order.status]
+                        )}>
+                          <StatusIcon className="w-3.5 h-3.5" />
+                          {ORDER_STATUS_LABELS[order.status] || order.status}
+                        </div>
+                      </td>
+                      <td className="py-5 px-6 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Link
+                            href={`/orders/${order.id}`}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-primary hover:text-white rounded-lg border border-border transition-all text-xs font-bold text-gray-700"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>View</span>
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -193,31 +386,42 @@ export default function OrdersPage() {
         {/* Pagination */}
         <div className="px-6 py-4 border-t border-border flex items-center justify-between">
           <p className="text-sm text-gray-500 font-medium">
-            Showing <span className="text-gray-900">1 to 8</span> of <span className="text-gray-900">24</span> results
+            Showing{" "}
+            <span className="text-gray-900">
+              {filteredOrders.length === 0 ? 0 : (page - 1) * pageSize + 1} to{" "}
+              {Math.min(page * pageSize, filteredOrders.length)}
+            </span>{" "}
+            of <span className="text-gray-900">{filteredOrders.length}</span> results
           </p>
           <div className="flex items-center gap-2">
-            <button className="p-2 border border-border rounded-lg hover:bg-gray-50 disabled:opacity-50" disabled>
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="p-2 border border-border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
               <ChevronLeft className="w-4 h-4" />
             </button>
-            <div className="flex items-center gap-1">
-              {[1, 2, 3].map((page) => (
-                <button
-                  key={page}
-                  className={cn(
-                    "w-8 h-8 text-sm font-semibold rounded-lg transition-all",
-                    page === 1 ? "bg-primary text-white shadow-md shadow-primary/20" : "hover:bg-gray-100 text-gray-600"
-                  )}
-                >
-                  {page}
-                </button>
-              ))}
-            </div>
-            <button className="p-2 border border-border rounded-lg hover:bg-gray-50">
+            <span className="text-xs font-bold text-gray-700 px-2">
+              Page {page} of {totalPages}
+            </span>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="p-2 border border-border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+            >
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OrdersPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-sm text-gray-400">Loading orders...</div>}>
+      <OrdersContent />
+    </Suspense>
   );
 }

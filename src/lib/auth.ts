@@ -1,15 +1,11 @@
 "use client";
 
-import Cookies from "js-cookie";
+import { createClient } from "@/lib/supabase/client";
 
-export function setSession(token: string) {
-  Cookies.set("febniks_auth", token, { expires: 1 }); // 1 day
-}
-
-export function getSession() {
-  return Cookies.get("febniks_auth");
-}
-
-export function clearSession() {
-  Cookies.remove("febniks_auth");
+export async function signOutAdmin() {
+  const supabase = createClient();
+  await supabase.auth.signOut();
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("febniks_remember_email");
+  }
 }

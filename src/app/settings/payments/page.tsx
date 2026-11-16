@@ -1,33 +1,67 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { ArrowLeft, Key, Save, Eye, EyeOff, ShieldCheck } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ArrowLeft, Save, ShieldCheck, Building2, CreditCard, User, FileText } from "lucide-react";
 import { toast } from "sonner";
+import { paymentSettingsSchema } from "@/lib/validations";
 
 export default function PaymentsSettingsPage() {
-  const [keys, setKeys] = useState({
-    paystackPublic: "pk_live_49f82d...b15c",
-    paystackSecret: "sk_live_92b0c1...d98a",
-    flutterwavePublic: "FLWPUBK-d9a28c...382e-X",
-    flutterwaveSecret: "FLWSECK-10c85b...4912-X",
+  const [form, setForm] = useState({
+    bank_name: "",
+    account_name: "",
+    account_number: "",
+    instructions: "",
   });
-
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
-  const [showPaystackPub, setShowPaystackPub] = useState(false);
-  const [showPaystackSec, setShowPaystackSec] = useState(false);
-  const [showFlwPub, setShowFlwPub] = useState(false);
-  const [showFlwSec, setShowFlwSec] = useState(false);
 
-  const handleSave = (e: React.FormEvent) => {
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const res = await fetch("/api/admin/payment-settings");
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to load payment settings");
+        if (json.settings) {
+          setForm({
+            bank_name: json.settings.bank_name || "",
+            account_name: json.settings.account_name || "",
+            account_number: json.settings.account_number || "",
+            instructions: json.settings.instructions || "",
+          });
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Error loading payment settings");
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadSettings();
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    const parsed = paymentSettingsSchema.safeParse(form);
+    if (!parsed.success) {
+      toast.error(parsed.error.issues[0]?.message || "Please check the fields.");
+      return;
+    }
+
     setSaving(true);
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/admin/payment-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed.data),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to update payment settings");
+      toast.success("Bank transfer payment settings updated!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save payment settings");
+    } finally {
       setSaving(false);
-      toast.success("API Keys updated successfully!");
-    }, 1000);
+    }
   };
 
   return (
@@ -41,156 +75,140 @@ export default function PaymentsSettingsPage() {
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div>
-          <h1 className="text-3xl font-black text-gray-900 font-display uppercase tracking-tight">Payment Integration</h1>
-          <p className="text-gray-500 mt-1 font-medium">Manage Paystack and Flutterwave API keys.</p>
+          <h1 className="text-3xl font-black text-gray-900 font-display uppercase tracking-tight">Payment Settings</h1>
+          <p className="text-gray-500 mt-1 font-medium">
+            Configure the bank account details shown to customers during checkout.
+          </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        {/* Left Card - Integration Info */}
+        {/* Left Card - Info */}
         <div className="space-y-6">
           <div className="dashboard-card border-none shadow-premium bg-white p-8">
             <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-6">
               <ShieldCheck className="w-6 h-6" />
             </div>
-            <h3 className="font-black text-gray-900 text-lg uppercase tracking-tight mb-2">Secure API storage</h3>
+            <h3 className="font-black text-gray-900 text-lg uppercase tracking-tight mb-2">
+              Manual Bank Transfer
+            </h3>
             <p className="text-xs text-gray-500 font-medium leading-relaxed">
-              Your API keys are stored securely using AES-256 encryption. Keep these keys private and do not share them with unauthorized personnel.
+              Customers transfer directly to this bank account and include their Order Number as the transfer narration/remark.
             </p>
-            <div className="mt-6 pt-6 border-t border-border/50">
-              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block mb-2">Gateways Available</span>
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-xs">PS</div>
-                  <span className="text-xs font-bold text-gray-700">Paystack Gateway</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-xs">FW</div>
-                  <span className="text-xs font-bold text-gray-700">Flutterwave Gateway</span>
-                </div>
-              </div>
+            <div className="mt-6 pt-6 border-t border-border/50 space-y-2">
+              <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest block">
+                Live Preview
+              </span>
+              <p className="text-xs font-bold text-gray-900">{form.bank_name || "—"}</p>
+              <p className="text-base font-mono font-black text-primary">
+                {form.account_number || "0000000000"}
+              </p>
+              <p className="text-xs font-semibold text-gray-600">{form.account_name || "—"}</p>
             </div>
           </div>
         </div>
 
-        {/* Right Card - API Keys Form */}
+        {/* Right Card - Payment Settings Form (id = 1) */}
         <div className="md:col-span-2">
           <div className="dashboard-card border-none shadow-premium bg-white">
-            <h3 className="font-black text-gray-900 mb-8 uppercase tracking-widest text-xs border-b border-border/50 pb-4">API Credentials</h3>
-            <form onSubmit={handleSave} className="space-y-8">
-              {/* Paystack Keys */}
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 border-b border-border/50 pb-2">
-                  <span className="text-xs font-black text-blue-600 uppercase tracking-widest">Paystack (NGN, GHS)</span>
-                </div>
-                
+            <h3 className="font-black text-gray-900 mb-8 uppercase tracking-widest text-xs border-b border-border/50 pb-4">
+              Receiving Bank Account (Row #1)
+            </h3>
+
+            {loading ? (
+              <div className="py-12 text-center text-sm text-gray-400">
+                Loading payment settings...
+              </div>
+            ) : (
+              <form onSubmit={handleSave} className="space-y-6">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Public Key</label>
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                      Bank Name
+                    </label>
                     <div className="relative">
-                      <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input 
+                      <Building2 className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
                         required
-                        type={showPaystackPub ? "text" : "password"}
-                        className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-12 outline-none focus:ring-4 focus:ring-primary/10 focus:bg-white transition-all font-mono text-xs text-gray-800"
-                        value={keys.paystackPublic}
-                        onChange={(e) => setKeys({...keys, paystackPublic: e.target.value})}
+                        type="text"
+                        placeholder="e.g. Moniepoint MFB"
+                        className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-4 outline-none focus:ring-4 focus:ring-primary/10 focus:bg-white transition-all font-bold text-sm text-gray-800"
+                        value={form.bank_name}
+                        onChange={(e) => setForm({ ...form, bank_name: e.target.value })}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowPaystackPub(!showPaystackPub)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showPaystackPub ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Secret Key</label>
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                      10-Digit Account Number
+                    </label>
                     <div className="relative">
-                      <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input 
+                      <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
                         required
-                        type={showPaystackSec ? "text" : "password"}
-                        className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-12 outline-none focus:ring-4 focus:ring-primary/10 focus:bg-white transition-all font-mono text-xs text-gray-800"
-                        value={keys.paystackSecret}
-                        onChange={(e) => setKeys({...keys, paystackSecret: e.target.value})}
+                        type="text"
+                        maxLength={10}
+                        pattern="\d{10}"
+                        placeholder="1234567890"
+                        className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-4 outline-none focus:ring-4 focus:ring-primary/10 focus:bg-white transition-all font-mono font-bold text-sm text-gray-800"
+                        value={form.account_number}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            account_number: e.target.value.replace(/\D/g, "").slice(0, 10),
+                          })
+                        }
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowPaystackSec(!showPaystackSec)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showPaystackSec ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Flutterwave Keys */}
-              <div className="space-y-6">
-                <div className="flex items-center gap-2 border-b border-border/50 pb-2">
-                  <span className="text-xs font-black text-orange-600 uppercase tracking-widest">Flutterwave (Global)</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Public Key</label>
-                    <div className="relative">
-                      <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input 
-                        required
-                        type={showFlwPub ? "text" : "password"}
-                        className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-12 outline-none focus:ring-4 focus:ring-primary/10 focus:bg-white transition-all font-mono text-xs text-gray-800"
-                        value={keys.flutterwavePublic}
-                        onChange={(e) => setKeys({...keys, flutterwavePublic: e.target.value})}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowFlwPub(!showFlwPub)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showFlwPub ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">Secret Key</label>
+                  <div className="sm:col-span-2">
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                      Account Name
+                    </label>
                     <div className="relative">
-                      <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input 
+                      <User className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
                         required
-                        type={showFlwSec ? "text" : "password"}
-                        className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-12 outline-none focus:ring-4 focus:ring-primary/10 focus:bg-white transition-all font-mono text-xs text-gray-800"
-                        value={keys.flutterwaveSecret}
-                        onChange={(e) => setKeys({...keys, flutterwaveSecret: e.target.value})}
+                        type="text"
+                        placeholder="e.g. FEBNIKS KITCHEN LTD"
+                        className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-4 outline-none focus:ring-4 focus:ring-primary/10 focus:bg-white transition-all font-bold text-sm text-gray-800"
+                        value={form.account_name}
+                        onChange={(e) => setForm({ ...form, account_name: e.target.value })}
                       />
-                      <button
-                        type="button"
-                        onClick={() => setShowFlwSec(!showFlwSec)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                      >
-                        {showFlwSec ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2">
+                      Transfer Instructions for Customers
+                    </label>
+                    <div className="relative">
+                      <FileText className="absolute left-4 top-4 w-4 h-4 text-gray-400" />
+                      <textarea
+                        rows={3}
+                        placeholder="Use your Order Number as the transfer remark and upload your receipt."
+                        className="w-full bg-gray-50 border border-border rounded-xl py-3.5 pl-12 pr-4 outline-none focus:ring-4 focus:ring-primary/10 focus:bg-white transition-all font-medium text-sm text-gray-800 resize-none"
+                        value={form.instructions}
+                        onChange={(e) => setForm({ ...form, instructions: e.target.value })}
+                      />
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="pt-4 flex justify-end">
-                <button 
-                  type="submit"
-                  disabled={saving}
-                  className="px-8 py-4 bg-primary text-white rounded-2xl font-black text-xs shadow-xl shadow-primary/20 hover:bg-primary-dark transition-all uppercase tracking-widest flex items-center gap-2 disabled:opacity-70 active:scale-95"
-                >
-                  <Save className="w-4 h-4" />
-                  {saving ? "Saving..." : "Save API Keys"}
-                </button>
-              </div>
-            </form>
+                <div className="pt-4 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="px-8 py-4 bg-primary text-white rounded-2xl font-black text-xs shadow-xl shadow-primary/20 hover:bg-primary-dark transition-all uppercase tracking-widest flex items-center gap-2 disabled:opacity-70 active:scale-95"
+                  >
+                    <Save className="w-4 h-4" />
+                    {saving ? "Saving..." : "Save Payment Settings"}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       </div>

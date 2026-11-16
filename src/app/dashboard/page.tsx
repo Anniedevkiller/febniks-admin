@@ -1,16 +1,15 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { 
   TrendingUp, 
-  TrendingDown, 
   ShoppingBag, 
   DollarSign, 
   Clock, 
-  MessageSquare,
+  CreditCard,
   ArrowRight,
-  MoreVertical,
-  Filter,
+  Eye,
   Download
 } from "lucide-react";
 import { 
@@ -21,42 +20,124 @@ import {
   CartesianGrid, 
   Tooltip, 
   ResponsiveContainer,
-  BarChart,
-  Bar,
-  Cell
 } from "recharts";
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import { ORDER_STATUS_LABELS, type Order, type OrderStatus } from "@/lib/types";
 
-const salesData = [
-  { name: "Mon", revenue: 4000, orders: 24 },
-  { name: "Tue", revenue: 3000, orders: 18 },
-  { name: "Wed", revenue: 5000, orders: 32 },
-  { name: "Thu", revenue: 2780, orders: 20 },
-  { name: "Fri", revenue: 6000, orders: 40 },
-  { name: "Sat", revenue: 8000, orders: 55 },
-  { name: "Sun", revenue: 7000, orders: 48 },
+const CONFIRMED_STATUSES: OrderStatus[] = [
+  "paid",
+  "preparing",
+  "ready",
+  "out_for_delivery",
+  "delivered",
 ];
 
-const bestSellers = [
-  { name: "Spicy Grilled Fish", sales: 120, color: "#E63946" },
-  { name: "Jollof Rice Special", sales: 98, color: "#F4A261" },
-  { name: "Pepper Soup", sales: 85, color: "#9B2226" },
-  { name: "Fried Yam & Sauce", sales: 70, color: "#2A9D8F" },
-];
-
-const recentOrders = [
-  { id: "#ORD-7721", customer: "John Doe", items: "Grilled Tilapia, Jollof Rice", total: "₦12,500", status: "Delivered", time: "2 mins ago" },
-  { id: "#ORD-7722", customer: "Jane Smith", items: "Catfish Pepper Soup", total: "₦8,000", status: "Cooking", time: "10 mins ago" },
-  { id: "#ORD-7723", customer: "Robert Brown", items: "Fried Fish, Plantain", total: "₦5,500", status: "Out for delivery", time: "15 mins ago" },
-  { id: "#ORD-7724", customer: "Alice Green", items: "Spicy Croaker Fish", total: "₦9,200", status: "Pending", time: "25 mins ago" },
-];
+const BAR_COLORS = ["#E63946", "#F4A261", "#9B2226", "#2A9D8F"];
 
 export default function Dashboard() {
-  const [mounted, setMounted] = React.useState(false);
-  React.useEffect(() => {
-    setMounted(true);
+  const [mounted, setMounted] = useState(false);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [rangeDays, setRangeDays] = useState<7 | 30>(7);
+
+  const loadDashboard = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/orders");
+      const json = await res.json();
+      if (res.ok) {
+        setOrders(json.orders || []);
+      }
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    setMounted(true);
+    loadDashboard();
+
+    const supabase = createClient();
+    const channel = supabase
+      .channel("dashboard-realtime-orders")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "orders" },
+        () => {
+          loadDashboard();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadDashboard]);
+
+  // Real Metrics
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const todaysOrders = orders.filter(
+    (o) => o.created_at && o.created_at.slice(0, 10) === todayStr
+  );
+  const todaysConfirmedRevenue = todaysOrders
+    .filter((o) => CONFIRMED_STATUSES.includes(o.status))
+    .reduce((sum, o) => sum + Number(o.total || 0), 0);
+
+  const awaitingConfirmationOrders = orders.filter(
+    (o) => o.status === "awaiting_confirmation"
+  );
+
+  const activeKitchenOrders = orders.filter((o) =>
+    ["paid", "preparing", "ready", "out_for_delivery"].includes(o.status)
+  );
+
+  // Chart Data (Last 7 or 30 days)
+  const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const salesData = Array.from({ length: rangeDays }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (rangeDays - 1 - i));
+    const dateKey = d.toISOString().slice(0, 10);
+    const matching = orders.filter(
+      (o) => o.created_at && o.created_at.slice(0, 10) === dateKey
+    );
+    const rev = matching
+      .filter((o) => CONFIRMED_STATUSES.includes(o.status))
+      .reduce((sum, o) => sum + Number(o.total || 0), 0);
+    return {
+      name:
+        rangeDays === 7
+          ? dayNames[d.getDay()]
+          : `${d.getDate()}/${d.getMonth() + 1}`,
+      revenue: rev,
+      orders: matching.length,
+    };
+  });
+
+  // Best Selling Meals from confirmed order_items
+  const mealCounts = new Map<string, number>();
+  orders
+    .filter((o) => CONFIRMED_STATUSES.includes(o.status))
+    .forEach((o) => {
+      (o.order_items || []).forEach((item) => {
+        mealCounts.set(
+          item.meal_name,
+          (mealCounts.get(item.meal_name) || 0) + Number(item.quantity || 1)
+        );
+      });
+    });
+
+  const bestSellers = Array.from(mealCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([name, sales], idx) => ({
+      name,
+      sales,
+      color: BAR_COLORS[idx % BAR_COLORS.length],
+    }));
+
+  const maxSales = Math.max(1, ...bestSellers.map((b) => b.sales));
+  const latestOrders = orders.slice(0, 6);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
@@ -64,53 +145,59 @@ export default function Dashboard() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Dashboard Overview</h1>
-          <p className="text-gray-500 mt-1">Welcome back, Admin! Here's what's happening today.</p>
+          <p className="text-gray-500 mt-1">
+            Welcome back, Admin! Here&apos;s what&apos;s happening today.
+          </p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-white border border-border rounded-xl text-sm font-medium hover:bg-gray-50 transition-colors">
-            <Filter className="w-4 h-4" />
-            <span>Filter</span>
-          </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-dark transition-colors shadow-lg shadow-primary/20">
+          {awaitingConfirmationOrders.length > 0 && (
+            <Link
+              href="/payments"
+              className="flex items-center gap-2 px-4 py-2 bg-amber-500 text-white rounded-xl text-sm font-bold hover:bg-amber-600 transition-colors shadow-sm"
+            >
+              <CreditCard className="w-4 h-4" />
+              <span>{awaitingConfirmationOrders.length} Awaiting Confirmation</span>
+            </Link>
+          )}
+          <Link
+            href="/orders"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-xl text-sm font-medium hover:bg-primary-dark transition-colors shadow-lg shadow-primary/20"
+          >
             <Download className="w-4 h-4" />
-            <span>Export Report</span>
-          </button>
+            <span>Manage Orders</span>
+          </Link>
         </div>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
-          title="Total Revenue" 
-          value="₦2.4M" 
-          change="+12.5%" 
-          isUp={true} 
+          title="Today's Confirmed Revenue" 
+          value={`₦${todaysConfirmedRevenue.toLocaleString()}`} 
+          subtitle="Verified paid orders today" 
           icon={DollarSign} 
           iconClass="bg-green-100 text-green-600" 
         />
         <StatCard 
-          title="Total Orders" 
-          value="1,248" 
-          change="+8.2%" 
-          isUp={true} 
+          title="Today's Orders" 
+          value={String(todaysOrders.length)} 
+          subtitle={`${orders.length} total all-time`} 
           icon={ShoppingBag} 
           iconClass="bg-red-100 text-primary" 
         />
         <StatCard 
-          title="Active Orders" 
-          value="42" 
-          change="-3.1%" 
-          isUp={false} 
-          icon={Clock} 
-          iconClass="bg-blue-100 text-blue-600" 
+          title="Awaiting Confirmation" 
+          value={String(awaitingConfirmationOrders.length)} 
+          subtitle="Needs bank check" 
+          icon={CreditCard} 
+          iconClass="bg-orange-100 text-accent" 
         />
         <StatCard 
-          title="Support Tickets" 
-          value="12" 
-          change="+4" 
-          isUp={true} 
-          icon={MessageSquare} 
-          iconClass="bg-orange-100 text-accent" 
+          title="Active in Kitchen / Transit" 
+          value={String(activeKitchenOrders.length)} 
+          subtitle="Paid, preparing, ready & transit" 
+          icon={Clock} 
+          iconClass="bg-blue-100 text-blue-600" 
         />
       </div>
 
@@ -119,10 +206,14 @@ export default function Dashboard() {
         {/* Main Revenue Chart */}
         <div className="lg:col-span-2 dashboard-card">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="text-lg font-bold">Revenue Analytics</h3>
-            <select className="bg-gray-50 border border-border text-sm rounded-lg px-3 py-1 outline-none">
-              <option>Last 7 Days</option>
-              <option>Last 30 Days</option>
+            <h3 className="text-lg font-bold">Confirmed Revenue Trend</h3>
+            <select
+              value={rangeDays}
+              onChange={(e) => setRangeDays(Number(e.target.value) as 7 | 30)}
+              className="bg-gray-50 border border-border text-sm rounded-lg px-3 py-1 outline-none"
+            >
+              <option value={7}>Last 7 Days</option>
+              <option value={30}>Last 30 Days</option>
             </select>
           </div>
           <div className="h-[350px] w-full">
@@ -168,39 +259,54 @@ export default function Dashboard() {
         </div>
 
         {/* Best Sellers */}
-        <div className="dashboard-card">
-          <h3 className="text-lg font-bold mb-6">Best Selling Meals</h3>
-          <div className="space-y-6">
-            {bestSellers.map((item) => (
-              <div key={item.name} className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-gray-700">{item.name}</span>
-                  <span className="text-gray-500">{item.sales} sold</span>
-                </div>
-                <div className="w-full bg-gray-100 rounded-full h-2">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${(item.sales / 150) * 100}%` }}
-                    transition={{ duration: 1, ease: "easeOut" }}
-                    className="h-full rounded-full"
-                    style={{ backgroundColor: item.color }}
-                  />
-                </div>
+        <div className="dashboard-card flex flex-col justify-between">
+          <div>
+            <h3 className="text-lg font-bold mb-6">Best Selling Meals</h3>
+            {bestSellers.length === 0 ? (
+              <p className="text-sm text-gray-400 py-8 text-center">
+                No confirmed meal sales recorded yet.
+              </p>
+            ) : (
+              <div className="space-y-6">
+                {bestSellers.map((item) => (
+                  <div key={item.name} className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-gray-700 truncate max-w-[180px]">
+                        {item.name}
+                      </span>
+                      <span className="text-gray-500">{item.sales} sold</span>
+                    </div>
+                    <div className="w-full bg-gray-100 rounded-full h-2">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(item.sales / maxSales) * 100}%` }}
+                        transition={{ duration: 1, ease: "easeOut" }}
+                        className="h-full rounded-full"
+                        style={{ backgroundColor: item.color }}
+                      />
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-          <button className="w-full mt-8 py-3 border border-border rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 group">
-            View Analytics
+          <Link
+            href="/menu"
+            className="w-full mt-8 py-3 border border-border rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2 group"
+          >
+            Manage Menu
             <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
-          </button>
+          </Link>
         </div>
       </div>
 
-      {/* Recent Orders Section */}
+      {/* Latest Orders Section */}
       <div className="dashboard-card">
         <div className="flex items-center justify-between mb-8">
-          <h3 className="text-lg font-bold">Recent Orders</h3>
-          <button className="text-primary text-sm font-semibold hover:underline">View All Orders</button>
+          <h3 className="text-lg font-bold">Latest Orders</h3>
+          <Link href="/orders" className="text-primary text-sm font-semibold hover:underline">
+            View All Orders
+          </Link>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -211,34 +317,77 @@ export default function Dashboard() {
                 <th className="pb-4 px-0 font-normal">Items</th>
                 <th className="pb-4 px-0 font-normal">Amount</th>
                 <th className="pb-4 px-0 font-normal">Status</th>
-                <th className="pb-4 px-4 font-normal">Action</th>
+                <th className="pb-4 px-4 font-normal text-right">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {recentOrders.map((order) => (
-                <tr key={order.id} className="group hover:bg-gray-50 transition-colors">
-                  <td className="py-4 px-4 font-medium text-gray-900">{order.id}</td>
-                  <td className="py-4 px-0 text-sm text-gray-600">{order.customer}</td>
-                  <td className="py-4 px-0 text-sm text-gray-500 max-w-[200px] truncate">{order.items}</td>
-                  <td className="py-4 px-0 text-sm font-semibold text-gray-900">{order.total}</td>
-                  <td className="py-4 px-0">
-                    <span className={cn(
-                      "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
-                      order.status === "Delivered" && "bg-green-100 text-green-700",
-                      order.status === "Cooking" && "bg-blue-100 text-blue-700",
-                      order.status === "Out for delivery" && "bg-purple-100 text-purple-700",
-                      order.status === "Pending" && "bg-orange-100 text-orange-700"
-                    )}>
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="py-4 px-4">
-                    <button className="p-2 hover:bg-white rounded-lg border border-transparent hover:border-border transition-all">
-                      <MoreVertical className="w-4 h-4 text-gray-400" />
-                    </button>
+              {isLoading ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-sm text-gray-400">
+                    Loading latest orders...
                   </td>
                 </tr>
-              ))}
+              ) : latestOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-sm text-gray-400">
+                    No orders placed yet.
+                  </td>
+                </tr>
+              ) : (
+                latestOrders.map((order) => {
+                  const itemsSummary =
+                    order.order_items && order.order_items.length > 0
+                      ? order.order_items
+                          .map((i) => `${i.meal_name} (x${i.quantity})`)
+                          .join(", ")
+                      : "—";
+
+                  return (
+                    <tr key={order.id} className="group hover:bg-gray-50 transition-colors">
+                      <td className="py-4 px-4 font-bold text-gray-900">
+                        <Link href={`/orders/${order.id}`} className="hover:text-primary">
+                          #{order.order_number}
+                        </Link>
+                      </td>
+                      <td className="py-4 px-0 text-sm text-gray-600">{order.customer_name}</td>
+                      <td className="py-4 px-0 text-sm text-gray-500 max-w-[220px] truncate">
+                        {itemsSummary}
+                      </td>
+                      <td className="py-4 px-0 text-sm font-semibold text-gray-900">
+                        ₦{Number(order.total).toLocaleString()}
+                      </td>
+                      <td className="py-4 px-0">
+                        <span
+                          className={cn(
+                            "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                            order.status === "delivered" && "bg-green-100 text-green-700",
+                            order.status === "paid" && "bg-emerald-100 text-emerald-700",
+                            order.status === "preparing" && "bg-blue-100 text-blue-700",
+                            order.status === "ready" && "bg-cyan-100 text-cyan-700",
+                            order.status === "out_for_delivery" && "bg-purple-100 text-purple-700",
+                            order.status === "awaiting_confirmation" && "bg-amber-100 text-amber-800",
+                            order.status === "pending" && "bg-gray-100 text-gray-700",
+                            (order.status === "cancelled" ||
+                              order.status === "payment_rejected") &&
+                              "bg-red-100 text-red-700"
+                          )}
+                        >
+                          {ORDER_STATUS_LABELS[order.status] || order.status}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-right">
+                        <Link
+                          href={`/orders/${order.id}`}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 hover:bg-white rounded-lg border border-transparent hover:border-border text-xs font-bold text-gray-600 hover:text-primary transition-all"
+                        >
+                          <Eye className="w-4 h-4" />
+                          <span>Open</span>
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -247,12 +396,12 @@ export default function Dashboard() {
   );
 }
 
-function StatCard({ title, value, change, isUp, icon: Icon, iconClass }: any) {
+function StatCard({ title, value, subtitle, icon: Icon, iconClass }: any) {
   return (
     <div className="dashboard-card overflow-hidden relative">
       <div className="flex justify-between items-start">
         <div className="space-y-2">
-          <p className="text-sm font-medium text-gray-500 uppercase tracking-wider">{title}</p>
+          <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">{title}</p>
           <h2 className="text-3xl font-bold text-gray-900">{value}</h2>
         </div>
         <div className={cn("p-3 rounded-2xl", iconClass)}>
@@ -260,14 +409,11 @@ function StatCard({ title, value, change, isUp, icon: Icon, iconClass }: any) {
         </div>
       </div>
       <div className="mt-4 flex items-center gap-2">
-        <span className={cn(
-          "text-xs font-bold flex items-center",
-          isUp ? "text-green-600" : "text-red-600"
-        )}>
-          {isUp ? <TrendingUp className="w-3 h-3 mr-1" /> : <TrendingDown className="w-3 h-3 mr-1" />}
-          {change}
+        <span className="text-xs font-bold flex items-center text-green-600">
+          <TrendingUp className="w-3 h-3 mr-1" />
+          Live
         </span>
-        <span className="text-xs text-gray-400 font-medium">vs last month</span>
+        <span className="text-xs text-gray-400 font-medium">{subtitle}</span>
       </div>
       
       {/* Subtle background decoration */}
