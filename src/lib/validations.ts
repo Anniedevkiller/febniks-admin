@@ -66,6 +66,47 @@ export const profileUpdateSchema = z.object({
   phone: z.string().trim().max(40).optional().nullable(),
 });
 
+// Support Ticket & Messages Schemas
+export const ticketCreateSchema = z.object({
+  customer_name: z.string().trim().min(1, "Customer name is required").max(100),
+  customer_email: z.string().trim().email("Invalid email").optional().nullable(),
+  user_id: z.string().uuid("Invalid user ID").optional().nullable(),
+  order_id: z.string().uuid("Invalid order ID").optional().nullable(),
+  subject: z.string().trim().min(3, "Subject must be at least 3 characters").max(150),
+  type: z.string().trim().min(1).default("general"),
+  priority: z.enum(["low", "medium", "high"]).default("medium"),
+  initial_message: z.string().trim().min(1, "Message is required").max(2000),
+});
+
+export const ticketUpdateSchema = z.object({
+  status: z.enum(["open", "in_progress", "resolved", "closed"]).optional(),
+  priority: z.enum(["low", "medium", "high"]).optional(),
+});
+
+export const supportMessageSchema = z.object({
+  body: z.string().trim().min(1, "Message body cannot be empty").max(2000),
+});
+
+// Inventory Schemas
+export const inventoryItemSchema = z.object({
+  name: z.string().trim().min(1, "Item name is required").max(100),
+  category: z.string().trim().max(50).optional().nullable(),
+  unit: z.string().trim().min(1, "Unit is required").max(20).default("kg"),
+  quantity: z.coerce.number().min(0, "Quantity cannot be negative").default(0),
+  low_level: z.coerce.number().min(0).default(15),
+  critical_level: z.coerce.number().min(0).default(5),
+  is_active: z.boolean().default(true),
+});
+
+export const inventoryItemUpdateSchema = inventoryItemSchema.partial();
+
+export const inventoryAdjustSchema = z.object({
+  p_item_id: z.string().uuid("Invalid item ID"),
+  p_change: z.coerce.number().refine((val) => val !== 0, "Change amount cannot be zero"),
+  p_reason: z.string().trim().min(1, "Reason is required").max(100).default("adjustment"),
+  p_note: z.string().trim().max(500).optional().nullable(),
+});
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()

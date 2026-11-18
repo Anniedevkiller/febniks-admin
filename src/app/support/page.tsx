@@ -1,35 +1,106 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { 
-  HeadphonesIcon, 
   Ticket, 
   MessageCircle, 
   CheckCircle2, 
   Clock, 
-  AlertCircle,
   ArrowRight,
-  TrendingUp,
-  Users,
-  Plus
+  Plus,
+  Loader2,
+  AlertCircle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase/client";
+import type { SupportTicket } from "@/lib/types";
 
-const supportStats = [
-  { label: "Active Tickets", value: "8", icon: Ticket, color: "text-orange-600", bg: "bg-orange-50" },
-  { label: "Live Chats", value: "3", icon: MessageCircle, color: "text-blue-600", bg: "bg-blue-50" },
-  { label: "Resolved Today", value: "15", icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50" },
-  { label: "Avg. Response", value: "4m", icon: Clock, color: "text-purple-600", bg: "bg-purple-50" },
-];
-
-const recentTickets = [
-  { id: "#TKT-101", customer: "John Doe", issue: "Payment Failed", status: "Open", time: "2 mins ago" },
-  { id: "#TKT-102", customer: "Jane Smith", issue: "Order Delay", status: "In Progress", time: "15 mins ago" },
-  { id: "#TKT-103", customer: "Robert Brown", issue: "Refund Request", status: "Resolved", time: "1 hour ago" },
-];
+function formatRelativeTime(dateString: string): string {
+  try {
+    const diff = (Date.now() - new Date(dateString).getTime()) / 1000;
+    if (diff < 60) return "Just now";
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    return `${Math.floor(diff / 86400)}d ago`;
+  } catch {
+    return "Recent";
+  }
+}
 
 export default function SupportDashboard() {
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchTickets = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/support/tickets");
+      const data = await res.json();
+      if (res.ok && data.tickets) {
+        setTickets(data.tickets);
+      }
+    } catch (err) {
+      console.error("Failed to load tickets overview:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTickets();
+    const supabase = createClient();
+    const channel = supabase
+      .channel("support-overview-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "support_tickets" },
+        () => {
+          fetchTickets();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchTickets]);
+
+  // Derived stats
+  const activeCount = tickets.filter(
+    (t) => t.status === "open" || t.status === "in_progress"
+  ).length;
+
+  const liveChatCount = tickets.filter(
+    (t) => t.status === "in_progress"
+  ).length;
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const resolvedTodayCount = tickets.filter((t) => {
+    if (t.status !== "resolved") return false;
+    const updatedAt = new Date(t.updated_at);
+    return updatedAt >= todayStart;
+  }).length;
+
+  // Urgent tickets: open/in_progress, sorted by priority (high first) then last_message_at
+  const urgentTickets = [...tickets]
+    .filter((t) => t.status === "open" || t.status === "in_progress")
+    .sort((a, b) => {
+      const priorityWeight: Record<string, number> = { high: 3, medium: 2, low: 1 };
+      const diff = (priorityWeight[b.priority] || 0) - (priorityWeight[a.priority] || 0);
+      if (diff !== 0) return diff;
+      return new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime();
+    })
+    .slice(0, 6);
+
+  const stats = [
+    { label: "Active Tickets", value: activeCount.toString(), icon: Ticket, color: "text-orange-600", bg: "bg-orange-50" },
+    { label: "Live Chats", value: liveChatCount.toString(), icon: MessageCircle, color: "text-blue-600", bg: "bg-blue-50" },
+    { label: "Resolved Today", value: resolvedTodayCount.toString(), icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50" },
+    { label: "Avg. Response", value: "< 15m", icon: Clock, color: "text-purple-600", bg: "bg-purple-50" },
+  ];
+
   return (
     <div className="space-y-8 animate-in fade-in duration-700">
       {/* Header */}
@@ -51,13 +122,15 @@ export default function SupportDashboard() {
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {supportStats.map((stat) => (
+        {stats.map((stat) => (
           <div key={stat.label} className="dashboard-card group hover:translate-y-[-4px]">
             <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110", stat.bg, stat.color)}>
               <stat.icon className="w-6 h-6" />
             </div>
             <p className="text-sm font-bold text-gray-400 uppercase tracking-widest leading-none mb-2">{stat.label}</p>
-            <h2 className="text-3xl font-black text-gray-900">{stat.value}</h2>
+            <h2 className="text-3xl font-black text-gray-900">
+              {loading ? "..." : stat.value}
+            </h2>
           </div>
         ))}
       </div>
@@ -73,78 +146,134 @@ export default function SupportDashboard() {
             </Link>
           </div>
           <div className="overflow-x-auto">
-             <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-gray-50/50 text-gray-400 text-[10px] font-bold uppercase tracking-widest">
-                    <th className="py-4 px-6">Ticket ID</th>
-                    <th className="py-4 px-2">Customer</th>
-                    <th className="py-4 px-2">Issue Type</th>
-                    <th className="py-4 px-2">Status</th>
-                    <th className="py-4 px-6 text-right">Added</th>
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-gray-50/50 text-gray-400 text-[10px] font-bold uppercase tracking-widest">
+                  <th className="py-4 px-6">Ticket ID</th>
+                  <th className="py-4 px-2">Customer</th>
+                  <th className="py-4 px-2">Issue / Subject</th>
+                  <th className="py-4 px-2">Status</th>
+                  <th className="py-4 px-6 text-right">Added</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {loading ? (
+                  <tr>
+                    <td colSpan={5} className="py-12 text-center text-sm text-gray-400 font-medium">
+                      <div className="flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                        <span>Loading tickets...</span>
+                      </div>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {recentTickets.map((tkt) => (
-                    <tr key={tkt.id} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="py-4 px-6 font-bold text-gray-900 text-sm">{tkt.id}</td>
-                      <td className="py-4 px-2 text-sm text-gray-600 font-medium">{tkt.customer}</td>
-                      <td className="py-4 px-2 text-sm text-gray-500 font-medium">{tkt.issue}</td>
-                      <td className="py-4 px-2">
-                        <span className={cn(
-                          "px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-tighter",
-                          tkt.status === "Open" ? "bg-orange-100 text-orange-600" : 
-                          tkt.status === "In Progress" ? "bg-blue-100 text-blue-600" : "bg-green-100 text-green-600"
-                        )}>
-                          {tkt.status}
-                        </span>
-                      </td>
-                      <td className="py-4 px-6 text-right text-[10px] text-gray-400 font-bold uppercase">{tkt.time}</td>
-                    </tr>
-                  ))}
-                </tbody>
-             </table>
+                ) : urgentTickets.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-12 text-center text-sm text-gray-400 font-medium">
+                      No active urgent tickets.
+                    </td>
+                  </tr>
+                ) : (
+                  urgentTickets.map((t) => {
+                    const customerName = t.profiles?.full_name || t.profiles?.email || "Customer";
+                    return (
+                      <tr 
+                        key={t.id} 
+                        className="hover:bg-gray-50/50 transition-colors cursor-pointer group"
+                      >
+                        <td className="py-4 px-6">
+                          <Link href={`/support/chat?ticketId=${t.id}`} className="font-bold text-primary hover:underline text-xs">
+                            {t.ticket_number}
+                          </Link>
+                        </td>
+                        <td className="py-4 px-2">
+                          <p className="text-xs font-bold text-gray-800 truncate max-w-[140px]">{customerName}</p>
+                          <p className="text-[10px] text-gray-400 truncate max-w-[140px]">{t.profiles?.email || ""}</p>
+                        </td>
+                        <td className="py-4 px-2">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-gray-900 truncate max-w-[200px]">{t.subject}</span>
+                            <span className="text-[10px] text-gray-400 uppercase tracking-wider">{t.type}</span>
+                          </div>
+                        </td>
+                        <td className="py-4 px-2">
+                          <span className={cn(
+                            "px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider inline-flex items-center gap-1 border",
+                            t.status === "open" ? "bg-amber-50 text-amber-700 border-amber-200" :
+                            t.status === "in_progress" ? "bg-blue-50 text-blue-700 border-blue-200" :
+                            "bg-green-50 text-green-700 border-green-200"
+                          )}>
+                            {t.status === "open" && <AlertCircle className="w-2.5 h-2.5" />}
+                            {t.status === "in_progress" && <Clock className="w-2.5 h-2.5" />}
+                            {t.status.replace("_", " ")}
+                          </span>
+                        </td>
+                        <td className="py-4 px-6 text-right text-xs text-gray-400 font-medium">
+                          {formatRelativeTime(t.created_at)}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
-        {/* Canned Responses / Knowledge Base */}
+        {/* Quick Actions */}
         <div className="space-y-6">
-           <div className="dashboard-card bg-sidebar text-white shadow-xl shadow-sidebar/20">
-              <h3 className="text-lg font-bold mb-4">Quick Actions</h3>
-              <div className="space-y-3">
-                 <button className="w-full p-3 bg-white/10 hover:bg-white/20 rounded-xl text-left text-sm font-medium transition-colors flex items-center justify-between group">
-                    <span>Email Broadcast</span>
-                    <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-all" />
-                 </button>
-                 <button className="w-full p-3 bg-white/10 hover:bg-white/20 rounded-xl text-left text-sm font-medium transition-colors flex items-center justify-between group">
-                    <span>SMS Notifications</span>
-                    <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-all" />
-                 </button>
-                 <button className="w-full p-3 bg-accent text-white rounded-xl text-left text-sm font-bold transition-all hover:bg-accent/90 flex items-center justify-between group">
-                    <span>New Ticket</span>
-                    <Plus className="w-4 h-4" />
-                 </button>
-              </div>
-           </div>
+          <div className="dashboard-card bg-sidebar text-white shadow-xl shadow-sidebar/20">
+            <h3 className="text-lg font-bold mb-4">Quick Actions</h3>
+            <div className="space-y-3">
+              <Link
+                href="/support/tickets"
+                className="w-full p-3 bg-accent text-white rounded-xl text-left text-sm font-bold transition-all hover:bg-accent/90 flex items-center justify-between group"
+              >
+                <span>Manage Tickets</span>
+                <Plus className="w-4 h-4" />
+              </Link>
+              <Link
+                href="/support/chat"
+                className="w-full p-3 bg-white/10 hover:bg-white/20 text-white rounded-xl text-left text-sm font-bold transition-all flex items-center justify-between group"
+              >
+                <span>Live Chat Support</span>
+                <MessageCircle className="w-4 h-4" />
+              </Link>
+            </div>
+          </div>
 
-           <div className="dashboard-card">
-              <h3 className="font-bold text-gray-900 mb-4">Admin Activity</h3>
-              <div className="space-y-4">
-                  <div className="flex gap-3">
-                      <div className="w-2 h-2 rounded-full bg-green-500 mt-1.5" />
-                      <div>
-                        <p className="text-xs font-bold text-gray-800">Support Agent A</p>
-                        <p className="text-[10px] text-gray-500 font-medium">Replied to #TKT-102</p>
-                      </div>
-                  </div>
-                  <div className="flex gap-3">
-                      <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5" />
-                      <div>
-                        <p className="text-xs font-bold text-gray-800">System Bot</p>
-                        <p className="text-[10px] text-gray-500 font-medium">Assigned #TKT-101 to Admin</p>
-                      </div>
-                  </div>
+          <div className="dashboard-card">
+            <h3 className="font-bold text-gray-900 mb-4">Ticket Status Summary</h3>
+            <div className="space-y-3 text-xs">
+              <div className="flex justify-between items-center py-1.5 border-b border-border/50">
+                <span className="font-bold text-gray-600 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  Open
+                </span>
+                <span className="font-black text-gray-900">{tickets.filter(t => t.status === "open").length}</span>
               </div>
-           </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-border/50">
+                <span className="font-bold text-gray-600 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-blue-500" />
+                  In Progress
+                </span>
+                <span className="font-black text-gray-900">{tickets.filter(t => t.status === "in_progress").length}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5 border-b border-border/50">
+                <span className="font-bold text-gray-600 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-500" />
+                  Resolved
+                </span>
+                <span className="font-black text-gray-900">{tickets.filter(t => t.status === "resolved").length}</span>
+              </div>
+              <div className="flex justify-between items-center py-1.5">
+                <span className="font-bold text-gray-600 flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-gray-400" />
+                  Closed
+                </span>
+                <span className="font-black text-gray-900">{tickets.filter(t => t.status === "closed").length}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

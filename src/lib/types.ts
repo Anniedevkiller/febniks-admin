@@ -11,6 +11,9 @@ export type OrderStatus =
   | "cancelled"
   | "payment_rejected";
 
+export type TicketStatus = "open" | "in_progress" | "resolved" | "closed";
+export type TicketPriority = "low" | "medium" | "high";
+
 export interface Profile {
   id: string;
   full_name: string | null;
@@ -84,6 +87,58 @@ export interface PaymentSettings {
   account_number: string;
   instructions: string | null;
   updated_at?: string;
+}
+
+export interface SupportTicket {
+  id: string;
+  ticket_number: string;
+  user_id: string;
+  order_id: string | null;
+  subject: string;
+  type: string;
+  priority: TicketPriority;
+  status: TicketStatus;
+  last_message_at: string;
+  created_at: string;
+  updated_at: string;
+  profiles?: Profile | null;
+  orders?: Order | null;
+}
+
+export interface SupportMessage {
+  id: string;
+  ticket_id: string;
+  sender_id: string;
+  sender_role: "customer" | "admin";
+  body: string;
+  created_at: string;
+  profiles?: Profile | null;
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  category: string | null;
+  unit: string;
+  quantity: number;
+  low_level: number;
+  critical_level: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryLog {
+  id: string;
+  item_id: string;
+  change: number;
+  quantity_after: number;
+  reason: string;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  inventory_items?: InventoryItem | null;
+  profiles?: Profile | null;
 }
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
